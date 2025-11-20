@@ -118,14 +118,22 @@ Response example:
 ```
 
 ### Logging
+
 Set structured JSON logging by defining `LOG_FORMAT=json` before starting Uvicorn. Control verbosity with `LOG_LEVEL` (default `INFO`). Examples:
+
 ```powershell
 $env:LOG_FORMAT = 'json'; $env:LOG_LEVEL='DEBUG'; python -m uvicorn server:app --reload
 ```
+
 ```bash
 LOG_FORMAT=json LOG_LEVEL=DEBUG python -m uvicorn server:app --reload
 ```
-Text mode (default) uses: `%(asctime)s %(levelname)s [%(name)s] %(message)s`.
+
+**JSON mode** outputs structured logs for both application logs and uvicorn access logs:
+- App logs: `{"ts":"2025-11-19T18:00:00.123Z","level":"INFO","logger":"llama-fs","msg":"batch completed","file_count":42}`
+- Access logs: `{"ts":"2025-11-19T18:00:00.123Z","level":"INFO","logger":"uvicorn.access","msg":"127.0.0.1:53000 - \"POST /batch HTTP/1.1\" 200","type":"access"}`
+
+**Text mode** (default) uses: `%(asctime)s %(levelname)s [%(name)s] %(message)s`.
 
 The API is served on port 8000 by default. Example `curl` request (adjust path for your OS):
 ```bash
