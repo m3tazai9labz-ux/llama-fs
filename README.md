@@ -107,6 +107,26 @@ make install   # install dependencies
 make run       # start the dev server
 ```
 
+### Health check
+After starting the server you can verify it's running:
+```bash
+curl http://127.0.0.1:8000/health
+```
+Response example:
+```json
+{"status":"ok","groq_api_key":true,"ollama_available":false,"time": 1732032000.0}
+```
+
+### Logging
+Set structured JSON logging by defining `LOG_FORMAT=json` before starting Uvicorn. Control verbosity with `LOG_LEVEL` (default `INFO`). Examples:
+```powershell
+$env:LOG_FORMAT = 'json'; $env:LOG_LEVEL='DEBUG'; python -m uvicorn server:app --reload
+```
+```bash
+LOG_FORMAT=json LOG_LEVEL=DEBUG python -m uvicorn server:app --reload
+```
+Text mode (default) uses: `%(asctime)s %(levelname)s [%(name)s] %(message)s`.
+
 The API is served on port 8000 by default. Example `curl` request (adjust path for your OS):
 ```bash
 curl -X POST http://127.0.0.1:8000/batch \

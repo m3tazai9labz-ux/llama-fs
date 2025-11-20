@@ -2,11 +2,13 @@ import json
 import os
 import pathlib
 import queue
+import logging
 from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 import time
 import shutil  # Add this import at the beginning of your file
+from datetime import datetime
 
 import agentops
 import colorama
@@ -31,6 +33,71 @@ from src.watch_utils import create_file_tree as create_watch_file_tree
 from dotenv import load_dotenv
 load_dotenv()
 
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_FORMAT = os.getenv("LOG_FORMAT", "text").lower()  # 'text' or 'json'
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "ts": datetime.utcnow().isoformat() + "Z",
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        # Optional extras
+        for extra_key in ["session_id", "request_id"]:
+            if hasattr(record, extra_key):
+                payload[extra_key] = getattr(record, extra_key)
+        return json.dumps(payload, ensure_ascii=False)
+
+class AccessLogFormatter(logging.Formatter):
+    """Custom formatter for uvicorn access logs that outputs JSON when LOG_FORMAT=json."""
+    def format(self, record: logging.LogRecord) -> str:
+        if LOG_FORMAT == "json":
+            # Parse the default uvicorn access log message for structured data
+            msg = record.getMessage()
+            payload = {
+                "ts": datetime.utcnow().isoformat() + "Z",
+                "level": record.levelname,
+                "logger": record.name,
+                "msg": msg,
+                "type": "access",
+            }
+            # Extract structured fields if available from record
+            for attr in ["client_addr", "method", "full_path", "http_version", "status_code"]:
+                if hasattr(record, attr):
+                    payload[attr] = getattr(record, attr)
+            return json.dumps(payload, ensure_ascii=False)
+        else:
+            # Use default uvicorn access log format
+            return super().format(record)
+
+handler = logging.StreamHandler()
+if LOG_FORMAT == "json":
+    handler.setFormatter(JsonFormatter())
+else:
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+
+logger = logging.getLogger("llama-fs")
+logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+logger.handlers = [handler]
+logger.propagate = False
+
+# Configure uvicorn access logger
+access_logger = logging.getLogger("uvicorn.access")
+access_logger.handlers = []  # Clear default handlers
+access_handler = logging.StreamHandler()
+if LOG_FORMAT == "json":
+    access_handler.setFormatter(AccessLogFormatter())
+else:
+    # Use uvicorn's default format
+    access_handler.setFormatter(logging.Formatter('%(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s'))
+access_logger.addHandler(access_handler)
+access_logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
+access_logger.propagate = False
+
 agentops.init(tags=["llama-fs"],
               auto_start_session=False)
 
@@ -48,6 +115,7 @@ class CommitRequest(BaseModel):
 
 
 app = FastAPI()
+logger.info("FastAPI app initialized", extra={"event": "startup"})
 
 origins = [
     "*"
@@ -64,11 +132,38 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
+    logger.info("root endpoint hit")
     return {"message": "Hello World"}
+
+
+@app.get("/health")
+async def health():
+    """Basic health/status endpoint.
+
+    Returns:
+        dict: status info including env variable presence and optional service availability.
+    """
+    groq_key_present = bool(os.environ.get("GROQ_API_KEY"))
+    ollama_available = False
+    try:
+        # Lightweight availability check (list models) -- will fail fast if daemon not running
+        ollama.list()
+        ollama_available = True
+    except Exception:
+        pass
+    data = {
+        "status": "ok",
+        "groq_api_key": groq_key_present,
+        "ollama_available": ollama_available,
+        "time": time.time(),
+    }
+    logger.info("health check", extra={"groq_api_key": groq_key_present, "ollama_available": ollama_available})
+    return data
 
 
 @app.post("/batch")
 async def batch(request: Request):
+    logger.info("batch request received", extra={"path": request.path})
     session = agentops.start_session(tags=["LlamaFS"])
     path = request.path
     if not os.path.exists(path):
@@ -99,12 +194,14 @@ async def batch(request: Request):
 
     agentops.end_session(
         "Success", end_state_reason="Reorganized directory structure")
+    logger.info("batch completed", extra={"file_count": len(files)})
     return files
 
 
 @app.post("/watch")
 async def watch(request: Request):
     path = request.path
+    logger.info("watch request received", extra={"path": path})
     if not os.path.exists(path):
         raise HTTPException(
             status_code=400, detail="Path does not exist in filesystem")
@@ -131,12 +228,7 @@ async def watch(request: Request):
 
 @app.post("/commit")
 async def commit(request: CommitRequest):
-    print('*'*80)
-    print(request)
-    print(request.base_path)
-    print(request.src_path)
-    print(request.dst_path)
-    print('*'*80)
+    logger.info("commit request", extra={"base_path": request.base_path, "src_path": request.src_path, "dst_path": request.dst_path})
 
     src = os.path.join(request.base_path, request.src_path)
     dst = os.path.join(request.base_path, request.dst_path)
@@ -156,7 +248,9 @@ async def commit(request: CommitRequest):
             shutil.move(src, os.path.join(dst, os.path.basename(src)))
         else:
             shutil.move(src, dst)
+        logger.info("commit moved", extra={"src": src, "dst": dst})
     except Exception as e:
+        logger.error("commit error", extra={"error": str(e)})
         raise HTTPException(
             status_code=500,
             detail=f"An error occurred while moving the resource: {e}"
