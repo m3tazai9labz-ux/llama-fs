@@ -79,14 +79,37 @@ AgentOps is used for logging and monitoring and will report the latency, cost pe
 
 ## Usage
 
-To serve the application locally using FastAPI, run the following command
-   ```bash
-   fastapi dev server.py
-   ```
+### Install dependencies
+```powershell
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
 
-This will run the server by default on port 8000. The API can be queried using a `curl` command, and passing in the file path as the argument. For example, on the Downloads folder:
-   ```bash
-   curl -X POST http://127.0.0.1:8000/batch \
-    -H "Content-Type: application/json" \
-    -d '{"path": "/Users/<username>/Downloads/", "instruction": "string", "incognito": false}'
-   ```
+### Start dev server
+Run with Uvicorn (recommended):
+```powershell
+python -m uvicorn server:app --reload --host 127.0.0.1 --port 8000
+```
+
+Or use the included PowerShell helper script:
+```powershell
+./run.ps1
+```
+
+Or use the POSIX helper script:
+```bash
+./run.sh
+```
+
+Or use `make` (if installed):
+```bash
+make install   # install dependencies
+make run       # start the dev server
+```
+
+The API is served on port 8000 by default. Example `curl` request (adjust path for your OS):
+```bash
+curl -X POST http://127.0.0.1:8000/batch \
+ -H "Content-Type: application/json" \
+ -d '{"path": "/Users/<username>/Downloads/", "instruction": "string", "incognito": false}'
+```

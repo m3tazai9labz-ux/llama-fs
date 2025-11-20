@@ -16,3 +16,4 @@ langchain_core
 watchdog
 agentops
 python-dotenv
+uvicorn[standard]
